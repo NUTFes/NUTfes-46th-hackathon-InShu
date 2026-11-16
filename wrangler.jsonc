@@ -1,0 +1,8 @@
+{
+ "$schema": "node_modules/wrangler/config-schema.json", "name": "inshu", "main": ".open-next/worker.js",
+ "compatibility_date": "2026-11-01", "compatibility_flags": ["nodejs_compat"],
+ "assets": {"directory": ".open-next/assets", "binding": "ASSETS"},
+ "d1_databases": [{"binding":"DB","database_name":"inshu-local","database_id":"00000000-0000-0000-0000-000000000000","migrations_dir":"drizzle"}],
+ "r2_buckets": [{"binding":"PHOTOS","bucket_name":"inshu-photos-local"}],
+ "vars": {"DEV_LOGIN":"0","APP_ENV":"production","GEMINI_DETECT_MODEL":"gemini-2.5-flash","GEMINI_EDIT_MODEL":"gemini-2.5-flash-image","REPLACE_DAILY_LIMIT":"100"}
+}

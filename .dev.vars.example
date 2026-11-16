@@ -1,0 +1,7 @@
+DEV_LOGIN=1
+APP_ENV=local
+SESSION_SECRET=local-inshu-example-secret-change-before-deploy-32
+
+GEMINI_DETECT_MODEL=gemini-2.5-flash
+GEMINI_EDIT_MODEL=gemini-2.5-flash-image
+REPLACE_DAILY_LIMIT=100

@@ -36,7 +36,7 @@ pnpm が PATH にないこのリポジトリの環境では、各 `pnpm` を `& 
 | `GEMINI_EDIT_MODEL` | 画像編集モデル。初期値 `gemini-2.5-flash-image` |
 | `REPLACE_DAILY_LIMIT` | 1人1日あたり置き換え回数。初期値100、日付はJST |
 
-Bindings は D1 `DB`、R2 `PHOTOS`。`wrangler.jsonc` の ID はローカル用プレースホルダーです。`pnpm build:worker` は OpenNext による Worker パッケージ生成、`pnpm preview` はローカルプレビュー用です。今回の検証ではリモートへの接続・デプロイ・実 Gemini 呼び出しは実施していません。Slack OIDC のログイン・コールバックは 501 を返します。
+Bindings は D1 `DB`、R2 `PHOTOS`。`wrangler.jsonc` の ID はローカル用プレースホルダーです。`pnpm build:worker` は OpenNext による Worker パッケージ生成、`pnpm preview` はローカルプレビュー用です。今回の検証ではリモートへの接続・デプロイ・実 Gemini 呼び出しは実施していません。Slack OIDC の設定方法は下記を参照してください。
 
 ## オフラインで試す
 
@@ -109,3 +109,22 @@ OpenNextの生成ファイルを書き換えず、専用の小さなWorker `src/
 `pnpm cleanup:local` は同じロジックを `.wrangler/state/v3` に対して実行します。期限切れ写真のR2プレフィックスをページ送りで列挙し、元画像・加工版・残った画像を削除後、findings/editsを削除し、photosはexpiredの記録だけ残します。usageはJSTの日付で30日前より古い行を削除します。R2削除失敗時はDB行を残して再試行できます。期限前の写真は対象外です。
 
 `pnpm exec tsx scripts/verify-cleanup.ts` は実ローカルD1/R2に期限切れ／未期限の架空データを作り、削除・維持・冪等性を確認して試験用データを片付けます。`scripts/smoke.cjs` からも実行します。拡張したsmokeは基準の追加・編集・無効化、担当の追加・責任者切替・在籍解除、ギャラリー比較、他担当の制限、各画面の390px幅も検証します。smoke用の無効な基準・解除済み担当・サンプル写真はローカルDBに残ります。
+
+## Slack ログイン（times / kagesutagram 共通アプリ）
+
+同じ Slack アプリの Sign in with Slack を使います。アプリの Redirect URLs に各アプリの `https://<ホスト>/api/auth/slack/callback` をそれぞれ登録し、OpenID Connect scopes は `openid profile email` を指定してください。Bot のメッセージ送信権限は不要です。ローカルのリダイレクト先は Slack 側が許可する開発用URLを使用します。
+
+| 環境変数 | 設定 |
+|---|---|
+| `SLACK_CLIENT_ID` | 共通SlackアプリのClient ID |
+| `SLACK_CLIENT_SECRET` | 共通SlackアプリのClient Secret（サーバー専用） |
+| `SLACK_TEAM_ID` | 利用を許可するワークスペースID |
+| `APP_BASE_URL` | このアプリのorigin。末尾のパスなし。例 `https://inshu.example.com` |
+
+アプリごとに `APP_BASE_URL` と `SESSION_SECRET` を設定します。認証用Cookie名はアプリ別です。同一ホストに置く場合はアプリ間のCookie衝突を避けるためホストを分けてください。設定値は `.dev.vars.example` を参照し、秘密は公開しないでください。
+
+`/api/auth/slack/login` は10分有効の署名Cookieにstate・nonce・安全な戻り先を保存します。callbackでtoken交換、Slack JWKSによるRS256署名、issuer/audience/期限/nonce/teamを検証します。検証に失敗した場合はログイン画面へ戻り、セッションを作りません。開発ログインの既存条件も維持しています。
+
+未登録者には依頼文とコピー可能なSlackユーザーIDを表示し、セッションを発行しません。D1の `pending_logins` には未登録者の直近20人だけを保存（同じ人は最終試行日時を更新）します。責任者は `/lead/staff` でIDを貼り付けて追加するか、登録待ち一覧の「広報担当に追加」で登録できます。登録後は一覧から消え、本人が再ログインすると利用できます。在籍解除済みの担当は自動復帰せず、責任者の在籍復帰操作が必要です。表示名・アイコンのみログイン時の検証済みプロフィールで更新し、責任者権限は変更しません。
+
+更新時は `pnpm db:migrate:local` で `0001_pending_logins.sql` を適用してください。`tests/slack.test.ts` は実RSA鍵・fetch/JWKSモックで認証・拒否・登録待ち・セッション発行を検証します。Slack/Geminiの実接続やデプロイはこの検証に含みません。

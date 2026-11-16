@@ -5,3 +5,5 @@
 .jug-foam{opacity:0}.image-stage .box:disabled{pointer-events:none}.puff{margin-left:-55px;margin-top:-55px;transform:none}
 
 .batch-image img{aspect-ratio:auto}table{min-width:760px}th:nth-child(2),td:nth-child(2){white-space:nowrap}
+
+.pending-login{padding:16px 0;border-bottom:1px solid var(--line);overflow-wrap:anywhere}.login code{overflow-wrap:anywhere}.login .notice{text-align:left}

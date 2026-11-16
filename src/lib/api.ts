@@ -5,6 +5,7 @@ import { SESSION_COOKIE, SESSION_SECONDS, signSession, verifySession, sessionCoo
 import { HttpError, apiError, fail } from "./errors";
 import { canReadImage, canTransition, jstDate, riskScore, sanitizeDrink, validBox, type Photo, type Finding, type Rule, type Edit } from "./domain";
 import { detect, normalizeJpeg, replaceImage } from "./gemini";
+import { handleSlackAuth } from "./slack-auth";
 type RowFinding=Omit<Finding,"box"> & {box:string};
 const id=()=>crypto.randomUUID(); const now=()=>new Date().toISOString();
 const json=(data:unknown)=>Response.json(data,{headers:{"Cache-Control":"no-store"}});
@@ -17,7 +18,7 @@ export async function handle(request:Request, parts:string[]) {
   const body=async()=> {try {return await request.json() as Record<string,unknown>;} catch {return fail(400,"入力形式を確認してください。");}};
   const path=parts.join("/"); const post=request.method==="POST";
   if(post&&request.headers.get("origin")!==new URL(request.url).origin) fail(403,"このリクエストは受け付けられません。","forbidden");
-  if(path==="auth/slack/login"||path==="auth/slack/callback") return apiError(501,"not_implemented","Slack ログインは準備中です。");
+  if(path==="auth/slack/login"||path==="auth/slack/callback") return request.method==="GET" ? handleSlackAuth(request,env) : apiError(405,"method_not_allowed","GET を使用してください。");
   if(post&&path==="auth/dev-login") {
    const auth=await authEnvironment(); if(!auth.devLogin) fail(404,"ページが見つかりません。","not_found");
    let staffId:unknown;
@@ -54,7 +55,7 @@ export async function handle(request:Request, parts:string[]) {
    return json({id:ruleId});
   }
   if(parts[0]==="lead"&&parts[1]==="staff") {
-   if(!post) return json({staff:await all("SELECT id,slack_user_id,display_name,is_lead,is_active FROM staff ORDER BY created_at,id")});
+   if(!post) return json({staff:await all("SELECT id,slack_user_id,display_name,is_lead,is_active FROM staff ORDER BY created_at,id"),pending:await all("SELECT p.* FROM pending_logins p WHERE NOT EXISTS (SELECT 1 FROM staff s WHERE s.slack_user_id=p.slack_user_id) ORDER BY attempted_at DESC,slack_user_id LIMIT 20")});
    const b=await body();
    if(parts[2]) {
     if(typeof b.is_active!=="boolean"||typeof b.is_lead!=="boolean") fail(400,"在籍・責任者を確認してください。");
@@ -65,9 +66,9 @@ export async function handle(request:Request, parts:string[]) {
     if(!b.is_active) await sql("DELETE FROM sessions WHERE staff_id=?",parts[2]).run();
     return json({ok:true});
    }
-   if(typeof b.slack_user_id!=="string"||!/^U[A-Z0-9]{2,30}$/.test(b.slack_user_id)||typeof b.display_name!=="string"||!b.display_name.trim()||b.display_name.length>80) fail(400,"Slack ユーザーID（Uから始まる英数字）と表示名を入力してください。");
+   if(typeof b.slack_user_id!=="string"||!/^[UW][A-Z0-9]{2,30}$/.test(b.slack_user_id)||typeof b.display_name!=="string"||!b.display_name.trim()||b.display_name.length>80) fail(400,"Slack ユーザーID（UまたはWから始まる英数字）と表示名を入力してください。");
    if(await one("SELECT id FROM staff WHERE slack_user_id=?",b.slack_user_id)) fail(409,"このSlackユーザーは登録済みです。");
-   const staffId=id();await sql("INSERT INTO staff(id,slack_user_id,display_name,is_lead,is_active,created_at) VALUES(?,?,?,0,1,?)",staffId,b.slack_user_id,b.display_name.trim(),now()).run();return json({id:staffId});
+   const staffId=id();await sql("INSERT INTO staff(id,slack_user_id,display_name,is_lead,is_active,created_at) VALUES(?,?,?,0,1,?)",staffId,b.slack_user_id,b.display_name.trim(),now()).run();await sql("DELETE FROM pending_logins WHERE slack_user_id=?",b.slack_user_id).run();return json({id:staffId});
   }
   const activeRules=()=>all<Rule>("SELECT * FROM rules WHERE is_active=1 ORDER BY sort_order");
   const findings=async(photoId:string)=>(await all<RowFinding>("SELECT * FROM findings WHERE photo_id=?",photoId)).map(f=>({...f,box:JSON.parse(f.box)} as Finding));

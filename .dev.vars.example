@@ -5,3 +5,9 @@ SESSION_SECRET=local-inshu-example-secret-change-before-deploy-32
 GEMINI_DETECT_MODEL=gemini-2.5-flash
 GEMINI_EDIT_MODEL=gemini-2.5-flash-image
 REPLACE_DAILY_LIMIT=100
+
+# Slack OIDC（未設定時は開発ログインを使用）
+SLACK_CLIENT_ID=
+SLACK_CLIENT_SECRET=
+SLACK_TEAM_ID=
+APP_BASE_URL=http://localhost:3200

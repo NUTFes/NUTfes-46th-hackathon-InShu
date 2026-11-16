@@ -18,3 +18,5 @@ export const edits = sqliteTable("edits", { id:text().primaryKey(), photo_id:tex
  previous_key:text(), previous_findings:text().notNull(), reverted:integer().notNull().default(0)
 });
 export const usage = sqliteTable("usage", { staff_id:text().notNull().references(()=>staff.id), date:text().notNull(), replace_count:integer().notNull().default(0) },t=>[primaryKey({columns:[t.staff_id,t.date]})]);
+
+export const pendingLogins = sqliteTable("pending_logins", { slack_user_id:text().primaryKey(), display_name:text().notNull(), attempted_at:text().notNull() });

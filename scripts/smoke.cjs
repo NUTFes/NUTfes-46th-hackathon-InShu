@@ -11,6 +11,7 @@ const out=path.resolve(__dirname,'../.wrangler/verification');fs.mkdirSync(out,{
  page.setDefaultTimeout(30000);const errors=[];page.on('pageerror',e=>errors.push(e.message));
  console.log('ログイン画面を確認');await page.goto(base+'/',{waitUntil:'domcontentloaded'});console.log('表示URL',page.url());await page.waitForURL(url=>url.pathname==='/login');
  console.log('開発ログイン');await page.getByRole('button',{name:'開発ログイン',exact:true}).click();await page.waitForURL(base+'/');console.log('ログイン完了');
+ await page.getByText('まだ写真が選ばれていません。写真を選んでチェックを始めましょう。').waitFor();
  const jpeg=await page.evaluate(()=>{const c=document.createElement('canvas');c.width=720;c.height=480;const x=c.getContext('2d');x.fillStyle='#b7d6ca';x.fillRect(0,0,720,480);x.fillStyle='#416c5a';x.fillRect(100,90,160,220);x.fillStyle='white';x.font='40px sans-serif';x.fillText('OFFLINE TEST',280,240);return c.toDataURL('image/jpeg').split(',')[1];});
  const fixture=Buffer.from(jpeg,'base64');
  await page.getByLabel('写真を選ぶ',{exact:true}).setInputFiles([{name:'sample.jpg',mimeType:'image/jpeg',buffer:fixture},{name:'sample2.jpg',mimeType:'image/jpeg',buffer:fixture}]);
@@ -49,7 +50,7 @@ const out=path.resolve(__dirname,'../.wrangler/verification');fs.mkdirSync(out,{
  const gallery=(await (await other.request.get(base+'/api/gallery')).json()).photos;assert.ok(gallery.some(p=>p.id===photoId&&!p.is_owner));assert.ok(!gallery.some(p=>p.id===otherId));
  await otherPage.goto(base+'/gallery');assert.equal(await otherPage.getByRole('button',{name:'ビフォーアフターを見る'}).count(),0);
  console.log(require('node:child_process').execFileSync(process.execPath,[require.resolve('tsx/cli',{paths:[path.resolve(__dirname,'..')]}),'scripts/verify-cleanup.ts'],{cwd:path.resolve(__dirname,'..'),env:process.env,encoding:'utf8'}));
- assert.equal((await context.request.get(base+'/api/auth/slack/login')).status(),501);
+ await require('./smoke-slack.cjs')({page,context,base,out,batchId});
  assert.equal((await context.request.post(base+'/api/batches',{headers:{Origin:'https://example.invalid'},data:{photo_count:1}})).status(),403);
  assert.equal((await context.request.post(base+'/api/batches',{headers:{Origin:base},data:{photo_count:21}})).status(),400);
  // 宣言枚数を超えるアップロードを拒否。

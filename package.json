@@ -13,11 +13,13 @@
     "typecheck": "tsc --noEmit",
     "db:generate": "drizzle-kit generate",
     "db:migrate:local": "wrangler d1 migrations apply inshu-local --local",
-    "db:seed": "tsx scripts/seed.ts"
+    "db:seed": "tsx scripts/seed.ts",
+    "cleanup:local": "tsx scripts/cleanup.ts"
   },
   "dependencies": {
     "@opennextjs/cloudflare": "^1.0.0",
     "drizzle-orm": "^0.44.0",
+    "framer-motion": "^14.14.0",
     "jpeg-js": "^0.4.4",
     "jszip": "^3.10.1",
     "next": "^16.0.0",

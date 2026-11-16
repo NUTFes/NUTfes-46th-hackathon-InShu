@@ -1,0 +1,3 @@
+export function Jug({animated=false}:{animated?:boolean}) {
+ return <svg className={`jug ${animated?"jug-animated":""}`} viewBox="0 0 80 88" fill="none" aria-label="お酒からジュースに変わるジョッキ" role="img"><path d="M56 25h10c13 0 13 31 0 31H56" stroke="#1E2A33" strokeWidth="5"/><path d="M13 16h43v54c0 6-5 10-11 10H24c-6 0-11-4-11-10Z" fill="white" stroke="#1E2A33" strokeWidth="4"/><path className="jug-liquid" d="M17 32h35v37c0 4-3 7-7 7H24c-4 0-7-3-7-7Z" fill="#FF8A1F"/><path className="jug-foam" d="M15 28c-12-7-5-21 6-18 4-10 18-9 21 0 13-3 20 11 11 18Z" fill="#FFF2CA"/><circle cx="27" cy="44" r="4" fill="white" opacity=".8"/><circle cx="42" cy="57" r="3" fill="white" opacity=".7"/><circle cx="28" cy="67" r="2" fill="white"/></svg>;
+}

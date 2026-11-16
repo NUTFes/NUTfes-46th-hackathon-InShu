@@ -40,6 +40,35 @@ export async function handle(request:Request, parts:string[]) {
   }
   const staff=await getCurrentStaff(); if(!staff) fail(401,"ログインしてください。","unauthorized");
   if(parts[0]==="lead"&&!staff.is_lead) fail(403,"責任者の権限が必要です。","forbidden");
+  if(path==="gallery"&&!post) {
+   const photos=await all<Photo & {display_name:string}>("SELECT p.*,s.display_name FROM photos p JOIN staff s ON s.id=p.staff_id WHERE p.current_key IS NOT NULL AND p.status!='expired' AND p.expires_at>? ORDER BY p.edited_at DESC",now());
+   return json({photos:photos.map(p=>({id:p.id,display_name:p.display_name,expires_at:p.expires_at,is_owner:p.staff_id===staff.id,edited_at:p.edited_at}))});
+  }
+  if(parts[0]==="lead"&&parts[1]==="rules") {
+   if(!post) return json({rules:await all<Rule>("SELECT * FROM rules ORDER BY sort_order")});
+   const b=await body(), ruleId=parts[2]??id();
+   if(typeof b.name!=="string"||!b.name.trim()||b.name.length>50||typeof b.description!=="string"||!b.description.trim()||b.description.length>1000||!["replace","blur","warn"].includes(String(b.treatment))||!Number.isInteger(b.weight)||Number(b.weight)<1||Number(b.weight)>5||typeof b.is_active!=="boolean") fail(400,"名前・説明・扱い・重み（1〜5）・有効を確認してください。");
+   if(parts[2]&&!await one("SELECT id FROM rules WHERE id=?",ruleId)) fail(404,"基準が見つかりません。");
+   if(await one("SELECT id FROM rules WHERE name=? AND id!=?",b.name.trim(),ruleId)) fail(409,"同じ名前の基準があります。");
+   await sql("INSERT INTO rules(id,name,description,treatment,weight,is_active,sort_order,updated_by,updated_at) VALUES(?,?,?,?,?,?,(SELECT COALESCE(MAX(sort_order),-1)+1 FROM rules),?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,description=excluded.description,treatment=excluded.treatment,weight=excluded.weight,is_active=excluded.is_active,updated_by=excluded.updated_by,updated_at=excluded.updated_at",ruleId,b.name.trim(),b.description.trim(),b.treatment,b.weight,b.is_active?1:0,staff.id,now()).run();
+   return json({id:ruleId});
+  }
+  if(parts[0]==="lead"&&parts[1]==="staff") {
+   if(!post) return json({staff:await all("SELECT id,slack_user_id,display_name,is_lead,is_active FROM staff ORDER BY created_at,id")});
+   const b=await body();
+   if(parts[2]) {
+    if(typeof b.is_active!=="boolean"||typeof b.is_lead!=="boolean") fail(400,"在籍・責任者を確認してください。");
+    if(!await one("SELECT id FROM staff WHERE id=?",parts[2])) fail(404,"担当が見つかりません。");
+    // 自分の権限喪失を防ぎ、管理画面への入口を必ず残す。
+    if(parts[2]===staff.id&&(!b.is_active||!b.is_lead)) fail(409,"自分自身の在籍・責任者権限は解除できません。");
+    await sql("UPDATE staff SET is_active=?,is_lead=? WHERE id=?",b.is_active?1:0,b.is_lead?1:0,parts[2]).run();
+    if(!b.is_active) await sql("DELETE FROM sessions WHERE staff_id=?",parts[2]).run();
+    return json({ok:true});
+   }
+   if(typeof b.slack_user_id!=="string"||!/^U[A-Z0-9]{2,30}$/.test(b.slack_user_id)||typeof b.display_name!=="string"||!b.display_name.trim()||b.display_name.length>80) fail(400,"Slack ユーザーID（Uから始まる英数字）と表示名を入力してください。");
+   if(await one("SELECT id FROM staff WHERE slack_user_id=?",b.slack_user_id)) fail(409,"このSlackユーザーは登録済みです。");
+   const staffId=id();await sql("INSERT INTO staff(id,slack_user_id,display_name,is_lead,is_active,created_at) VALUES(?,?,?,0,1,?)",staffId,b.slack_user_id,b.display_name.trim(),now()).run();return json({id:staffId});
+  }
   const activeRules=()=>all<Rule>("SELECT * FROM rules WHERE is_active=1 ORDER BY sort_order");
   const findings=async(photoId:string)=>(await all<RowFinding>("SELECT * FROM findings WHERE photo_id=?",photoId)).map(f=>({...f,box:JSON.parse(f.box)} as Finding));
   const photo=async(photoId:string,owner=false)=>{

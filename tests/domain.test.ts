@@ -14,7 +14,12 @@ describe("炎上リスク",()=>{
 describe("Gemini JSON の検証",()=>{
  it("基準IDに変換する",()=>expect(parseDetection(JSON.stringify({findings:[entry]}),rules)[0]).toMatchObject({rule_id:"alcohol",status:"open",source:"ai"}));
  it("不明な基準を捨てる",()=>expect(parseDetection({findings:[{...entry,rule_name:"未登録"}]},rules)).toEqual([]));
- it.each([null,{},"bad",{findings:[{...entry,confidence:1.1}]},{findings:[{...entry,confidence:-1}]},{findings:[{...entry,box:{x:0.9,y:0,w:0.2,h:1}}]},{findings:[{...entry,reason:"あ".repeat(31)}]},{findings:[{...entry,box:{x:NaN,y:0,w:1,h:1}}]}])("不正値を拒否する %j",value=>expect(()=>parseDetection(value,rules)).toThrow());
+ it.each([null,{},"bad",{findings:[{...entry,confidence:1.1}]},{findings:[{...entry,confidence:-1}]},{findings:[{...entry,reason:"あ".repeat(31)}]},{findings:[{...entry,box:{x:NaN,y:0,w:1,h:1}}]}])("不正値を拒否する %j",value=>expect(()=>parseDetection(value,rules)).toThrow());
+ it("コードフェンスと基準名の大文字小文字・空白を許容し、枠を画像内に収める",()=>{
+  const input={findings:[{...entry,rule_name:"  aL CoHOL ",box:{x:-0.1,y:0.75,w:1.1,h:0.5}}]};
+  const wrapped="```JSON\n"+JSON.stringify(input)+"\n```";
+  expect(parseDetection(wrapped,[{...rules[0],name:"Alcohol"}])[0]).toMatchObject({rule_id:"alcohol",box:{x:0,y:0.75,w:1,h:0.25}});
+ });
  it("空の判定は有効",()=>expect(parseDetection({findings:[]},rules)).toEqual([]));
 });
 describe("飲み物名",()=>{
@@ -31,8 +36,8 @@ describe("画像アクセス",()=>{
  it("不明なバージョンを拒否",()=>expect(canReadImage("a","a","invalid",true)).toBe(false));
 });
 describe("状態遷移",()=>{
- it.each([["uploaded","detecting"],["detecting","detected"],["detecting","failed"],["failed","detecting"],["detected","edited"],["edited","edited"]])("%s→%s",(a,b)=>expect(canTransition(a as PhotoStatus,b as PhotoStatus)).toBe(true));
- it.each([["uploaded","edited"],["detecting","detecting"],["expired","detecting"],["failed","edited"]])("不正な%s→%s",(a,b)=>expect(canTransition(a as PhotoStatus,b as PhotoStatus)).toBe(false));
+ it.each([["uploaded","detecting"],["detecting","detected"],["detecting","failed"],["failed","detecting"],["failed","edited"],["detected","edited"],["edited","edited"]])("%s→%s",(a,b)=>expect(canTransition(a as PhotoStatus,b as PhotoStatus)).toBe(true));
+ it.each([["uploaded","edited"],["detecting","detecting"],["expired","detecting"]])("不正な%s→%s",(a,b)=>expect(canTransition(a as PhotoStatus,b as PhotoStatus)).toBe(false));
  it("JSTの日付を使う",()=>expect(jstDate(new Date("2026-11-16T15:00:00Z"))).toBe("2026-11-17"));
  it("ゼロ面積の枠を拒否",()=>expect(validBox({x:0,y:0,w:0,h:1})).toBe(false));
 });

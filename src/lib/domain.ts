@@ -25,12 +25,14 @@ export function canReadImage(staffId:string, uploaderId:string, version:string, 
  return version==="original" ? staffId===uploaderId : version==="current" && (hasCurrent || staffId===uploaderId);
 }
 export function canTransition(from:PhotoStatus,to:PhotoStatus) {
- const allowed:Record<PhotoStatus,PhotoStatus[]>={uploaded:["detecting","expired"],detecting:["detected","failed","expired"],detected:["detecting","edited","expired"],failed:["detecting","expired"],edited:["detecting","edited","expired"],expired:[]};
+ const allowed:Record<PhotoStatus,PhotoStatus[]>={uploaded:["detecting","expired"],detecting:["detected","failed","expired"],detected:["detecting","edited","expired"],failed:["detecting","edited","expired"],edited:["detecting","edited","expired"],expired:[]};
  return allowed[from].includes(to);
 }
 export function jstDate(date=new Date()) {return new Date(date.getTime()+9*3600000).toISOString().slice(0,10);}
+const normalizeRuleName=(name:string)=>name.replace(/\s+/g,"").toLowerCase();
+const clamp=(coordinate:number)=>Math.max(0,Math.min(1,coordinate));
 export function parseDetection(value:unknown,rules:Rule[]) {
- if(typeof value==="string") value=JSON.parse(value);
+ if(typeof value==="string") value=JSON.parse(value.trim().replace(/^```(?:json)?\s*([\s\S]*?)\s*```$/i,"$1"));
  if(!value || typeof value!=="object" || !Array.isArray((value as {findings:unknown}).findings)) throw new Error("判定結果の形式が不正です。");
  const items=(value as {findings:unknown[]}).findings;
  if(items.length>100) throw new Error("判定件数が多すぎます。");
@@ -38,9 +40,16 @@ export function parseDetection(value:unknown,rules:Rule[]) {
  for(const item of items) {
   if(!item || typeof item!=="object") throw new Error("判定項目が不正です。");
   const f=item as {rule_name:unknown;box:unknown;reason:unknown;confidence:unknown};
-  const rule=rules.find(r=>r.name===f.rule_name); if(!rule) continue;
-  if(!validBox(f.box)||typeof f.reason!=="string"||!f.reason.trim()||Array.from(f.reason).length>30||typeof f.confidence!=="number"||!Number.isFinite(f.confidence)||f.confidence<0||f.confidence>1) throw new Error("判定項目の値が不正です。");
-  result.push({rule_id:rule.id,box:f.box,reason:f.reason,confidence:f.confidence,source:"ai",status:"open"});
+  if(typeof f.rule_name!=="string") continue;
+  const name=normalizeRuleName(f.rule_name);
+  const rule=rules.find(r=>r.name===f.rule_name)??rules.find(r=>normalizeRuleName(r.name)===name);
+  if(!rule) continue;
+  const raw=f.box as Box|null;
+  if(!raw||![raw.x,raw.y,raw.w,raw.h].every(Number.isFinite)||typeof f.reason!=="string"||!f.reason.trim()||Array.from(f.reason).length>30||typeof f.confidence!=="number"||!Number.isFinite(f.confidence)||f.confidence<0||f.confidence>1) throw new Error("判定項目の値が不正です。");
+  const x=clamp(raw.x),y=clamp(raw.y);
+  const box={x,y,w:Math.min(clamp(raw.w),1-x),h:Math.min(clamp(raw.h),1-y)};
+  if(box.w===0||box.h===0) continue;
+  result.push({rule_id:rule.id,box,reason:f.reason,confidence:f.confidence,source:"ai",status:"open"});
  }
  return result;
 }

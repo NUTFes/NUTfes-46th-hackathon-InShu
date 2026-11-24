@@ -1,3 +1,4 @@
+import { checkDemoPasscode, demoLoginError, demoPasscode } from "./demo-login";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { cookies } from "next/headers";
 import { getCurrentStaff, authEnvironment } from "./auth";
@@ -20,12 +21,16 @@ export async function handle(request:Request, parts:string[]) {
   if(post&&request.headers.get("origin")!==new URL(request.url).origin) fail(403,"このリクエストは受け付けられません。","forbidden");
   if(path==="auth/slack/login"||path==="auth/slack/callback") return request.method==="GET" ? handleSlackAuth(request,env) : apiError(405,"method_not_allowed","GET を使用してください。");
   if(post&&path==="auth/dev-login") {
-   const auth=await authEnvironment(); if(!auth.devLogin) fail(404,"ページが見つかりません。","not_found");
-   let staffId:unknown;
-   if(request.headers.get("content-type")?.includes("application/json")) staffId=(await body()).staff_id;
-   else staffId=(await request.formData()).get("staff_id");
+   const auth=await authEnvironment(), passcode=demoPasscode(env);
+   if(!passcode&&!auth.devLogin) fail(404,"ページが見つかりません。","not_found");
+   const fields=request.headers.get("content-type")?.includes("application/json") ? await body() : Object.fromEntries(await request.formData());
+   if(passcode) {
+    const status=await checkDemoPasscode(env.DB,request,passcode,fields&&typeof fields==="object"?(fields as {passcode?:unknown}).passcode:undefined);
+    if(status!==200) fail(status,demoLoginError(status),status===429?"rate_limited":"invalid_passcode");
+   }
+   const staffId=fields.staff_id;
    if(typeof staffId!=="string") fail(400,"広報担当を選んでください。");
-   const member=await one<{id:string}>("SELECT id FROM staff WHERE id=? AND is_active=1",staffId);
+   const member=await one<{id:string}>("SELECT id FROM staff WHERE id=? AND is_active=1" + (passcode ? " AND slack_user_id GLOB 'FAKE_STAFF_[1-3]'" : ""),staffId);
    if(!member) fail(400,"在籍中の広報担当を選んでください。");
    if(auth.secret.length<32) fail(400,"SESSION_SECRET は32文字以上必要です。");
    const jar=await cookies(); const old=await verifySession(jar.get(SESSION_COOKIE)?.value,auth.secret);
@@ -112,7 +117,11 @@ export async function handle(request:Request, parts:string[]) {
   }
   if(parts[0]==="photos"&&parts[1]) {
    const action=parts[2]; const p=await photo(parts[1],post);
-   if(!action&&!post) return json({photo:p,findings:await findings(p.id),rules:p.rules_snapshot==="[]"?await activeRules():JSON.parse(p.rules_snapshot),edits:await all<Edit>("SELECT * FROM edits WHERE photo_id=? ORDER BY rowid DESC",p.id),is_owner:p.staff_id===staff.id,offline:!env.GEMINI_API_KEY});
+   if(!action&&!post) {
+    const isOwner=p.staff_id===staff.id;
+    const rulesForEditing=isOwner||p.rules_snapshot==="[]"?await activeRules():[];
+    return json({photo:p,findings:await findings(p.id),rules:p.rules_snapshot==="[]"?rulesForEditing:JSON.parse(p.rules_snapshot),manual_rules:isOwner?rulesForEditing:[],edits:await all<Edit>("SELECT * FROM edits WHERE photo_id=? ORDER BY rowid DESC",p.id),is_owner:isOwner,offline:!env.GEMINI_API_KEY});
+   }
    if(action==="image"&&!post) {
     const version=new URL(request.url).searchParams.get("v")??"current";
     if(!canReadImage(staff.id,p.staff_id,version,!!p.current_key)) fail(403,"元画像はアップロードした本人のみ閲覧できます。","forbidden");
@@ -134,9 +143,9 @@ export async function handle(request:Request, parts:string[]) {
     } catch {await sql("UPDATE photos SET status='failed',error=? WHERE id=?","判定に失敗しました。再試行してください。",p.id).run();return apiError(502,"detection_failed","3回の判定に失敗しました。再試行してください。");}
    }
    if(post&&["replace","blur","revert","findings"].includes(action)) {
-    if(!["detected","edited"].includes(p.status)) fail(409,"判定を完了してから加工してください。","invalid_state_transition");
+    if(!canTransition(p.status,"edited")) fail(409,"判定を完了してから加工してください。","invalid_state_transition");
     // risk_score=-1 を短時間の排他ロックに使い、画像と枠の履歴の競合を防ぐ。
-    const locked=await sql("UPDATE photos SET risk_score=-1 WHERE id=? AND status=? AND risk_score>=0",p.id,p.status).run();
+    const locked=await sql("UPDATE photos SET risk_score=-1 WHERE id=? AND status=? AND (risk_score IS NULL OR risk_score>=0)",p.id,p.status).run();
     if(!locked.meta.changes) fail(409,"別の加工が実行中です。","invalid_state_transition");
     let reserved=false,committed=false; const date=jstDate();
     try {
@@ -144,15 +153,21 @@ export async function handle(request:Request, parts:string[]) {
      if(action==="findings") {
       const b=await body(); const rule=(await activeRules()).find(r=>r.id===b.rule_id);
       if(!rule||!validBox(b.box)||typeof b.reason!=="string"||!b.reason.trim()||Array.from(b.reason).length>30) fail(400,"項目・枠・理由（30字以内）を確認してください。");
-      await sql("INSERT INTO findings(id,photo_id,rule_id,box,reason,confidence,source,status) VALUES(?,?,?,?,?,1,'manual','open')",id(),p.id,rule.id,JSON.stringify(b.box),b.reason).run();
-      const snapshot:Rule[]=JSON.parse(p.rules_snapshot); if(!snapshot.some(r=>r.id===rule.id)) {snapshot.push(rule);p.rules_snapshot=JSON.stringify(snapshot);await sql("UPDATE photos SET rules_snapshot=? WHERE id=?",p.rules_snapshot,p.id).run();}
+      const statements=[sql("INSERT INTO findings(id,photo_id,rule_id,box,reason,confidence,source,status) VALUES(?,?,?,?,?,1,'manual','open')",id(),p.id,rule.id,JSON.stringify(b.box),b.reason)];
+      const snapshot:Rule[]=JSON.parse(p.rules_snapshot);
+      if(!snapshot.some(r=>r.id===rule.id)) {
+       snapshot.push(rule);
+       statements.push(sql("UPDATE photos SET rules_snapshot=? WHERE id=?",JSON.stringify(snapshot),p.id));
+      }
+      await db.batch(statements);
+      p.rules_snapshot=JSON.stringify(snapshot);
       return json({ok:true});
      }
      if(action==="revert") {
       const last=await one<Edit>("SELECT * FROM edits WHERE photo_id=? AND kind!='revert' AND reverted=0 ORDER BY rowid DESC LIMIT 1",p.id);
       if(!last) fail(409,"戻せる加工がありません。","invalid_state_transition");
       const previous=JSON.parse(last.previous_findings) as {id:string;status:string}[];
-      await db.batch([sql("UPDATE edits SET reverted=1 WHERE id=?",last.id),...previous.map(f=>sql("UPDATE findings SET status=? WHERE id=? AND photo_id=?",f.status,f.id,p.id)),sql("UPDATE photos SET current_key=?,status=?,edited_at=? WHERE id=?",last.previous_key,last.previous_key?"edited":"detected",now(),p.id),sql("INSERT INTO edits(id,photo_id,kind,finding_ids,result_key,created_by,created_at,previous_key,previous_findings) VALUES(?,?,'revert','[]',?,?,?,?,?)",id(),p.id,last.previous_key??p.original_key,staff.id,now(),p.current_key,JSON.stringify(currentFindings.map(({id,status})=>({id,status}))))]);
+      await db.batch([sql("UPDATE edits SET reverted=1 WHERE id=?",last.id),...previous.map(f=>sql("UPDATE findings SET status=? WHERE id=? AND photo_id=?",f.status,f.id,p.id)),sql("UPDATE photos SET current_key=?,status=?,edited_at=? WHERE id=?",last.previous_key,last.previous_key?"edited":p.error?"failed":"detected",now(),p.id),sql("INSERT INTO edits(id,photo_id,kind,finding_ids,result_key,created_by,created_at,previous_key,previous_findings) VALUES(?,?,'revert','[]',?,?,?,?,?)",id(),p.id,last.previous_key??p.original_key,staff.id,now(),p.current_key,JSON.stringify(currentFindings.map(({id,status})=>({id,status}))))]);
       return json({ok:true});
      }
      let findingIds:unknown,drink="",bytes:Uint8Array|undefined;
@@ -186,7 +201,8 @@ export async function handle(request:Request, parts:string[]) {
    const p=await photo(f.photo_id,true);
    const target=parts[2]==="dismiss"?"dismissed":"open";
    if(f.status!==(target==="dismissed"?"open":"dismissed")) fail(409,"この枠は変更できません。","invalid_state_transition");
-   const lock=await sql("UPDATE photos SET risk_score=-1 WHERE id=? AND risk_score>=0 AND status IN ('detected','edited')",p.id).run();
+   if(!canTransition(p.status,"edited")) fail(409,"判定を完了してから加工してください。","invalid_state_transition");
+   const lock=await sql("UPDATE photos SET risk_score=-1 WHERE id=? AND risk_score>=0 AND status=?",p.id,p.status).run();
    if(!lock.meta.changes) fail(409,"別の処理が実行中です。","invalid_state_transition");
    try {await sql("UPDATE findings SET status=? WHERE id=?",target,f.id).run();}finally{await recalculate(p);}
    return json({ok:true});

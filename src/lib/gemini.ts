@@ -3,8 +3,17 @@ import jpeg from "jpeg-js";
 const inline=(bytes:Uint8Array)=>({inlineData:{mimeType:"image/jpeg",data:Buffer.from(bytes).toString("base64")}});
 async function generate(env:CloudflareEnv,model:string,body:unknown) {
  const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":env.GEMINI_API_KEY!},body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
- if(!response.ok) throw new Error("AI の処理に失敗しました。");
- return await response.json() as {candidates?:{content?:{parts?:{text?:string;inlineData?:{data:string;mimeType:string}}[]}}[]};
+ if(!response.ok) {
+  const errorBody=await response.text().catch(()=>"");
+  console.error("Gemini HTTP",response.status,errorBody.slice(0,500));
+  throw new Error("AI の処理に失敗しました。");
+ }
+ try {
+  return await response.json() as {candidates?:{content?:{parts?:{text?:string;inlineData?:{data:string;mimeType:string}}[]}}[]};
+ } catch(error) {
+  console.error("Gemini API 応答の解析エラー",error instanceof Error?error.message:String(error));
+  throw error;
+ }
 }
 export async function detect(env:CloudflareEnv,bytes:Uint8Array,rules:Rule[]) {
  let error:unknown;
@@ -17,7 +26,14 @@ export async function detect(env:CloudflareEnv,bytes:Uint8Array,rules:Rule[]) {
    contents:[{parts:[{text:`広報写真のチェック係として、次の基準に当てはまる写り込みだけを挙げる。当てはまらないものは挙げない。迷ったら confidence を低くして挙げる。人物の容姿については述べない。理由は日本語30字以内。枠は画像の左上を原点とする0〜1の割合。基準: ${JSON.stringify(rules.map(({name,description})=>({name,description})))}`},inline(bytes)]}],
    generationConfig:{responseMimeType:"application/json",responseSchema:{type:"OBJECT",properties:{findings:{type:"ARRAY",items:{type:"OBJECT",properties:{rule_name:{type:"STRING"},box:{type:"OBJECT",properties:{x:{type:"NUMBER"},y:{type:"NUMBER"},w:{type:"NUMBER"},h:{type:"NUMBER"}},required:["x","y","w","h"]},reason:{type:"STRING"},confidence:{type:"NUMBER"}},required:["rule_name","box","reason","confidence"]}}},required:["findings"]}}
   });
-  return parseDetection(response.candidates?.[0]?.content?.parts?.map(p=>p.text??"").join("")??"",rules);
+  const content=response.candidates?.[0]?.content?.parts?.map(p=>p.text??"").join("");
+  try {
+   if(!content?.trim()) throw new Error("判定結果が空です。");
+   return parseDetection(content,rules);
+  } catch(error) {
+   console.error("Gemini 判定結果の解析エラー",error instanceof Error?error.message:String(error));
+   throw error;
+  }
  } catch(e) { error=e; }
  throw error;
 }

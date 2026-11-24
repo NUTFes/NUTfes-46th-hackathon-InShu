@@ -1,8 +1,10 @@
 import { parseDetection, type Rule, type Box } from "./domain";
+// 秘密の値の前後に付いた BOM・空白・改行を取り除く（PowerShell の Get-Clipboard 経由で登録すると BOM が付くため）
+export const geminiKey=(env:{GEMINI_API_KEY?:string})=>(env.GEMINI_API_KEY??"").replace(/^﻿/,"").trim();
 import jpeg from "jpeg-js";
 const inline=(bytes:Uint8Array)=>({inlineData:{mimeType:"image/jpeg",data:Buffer.from(bytes).toString("base64")}});
 async function generate(env:CloudflareEnv,model:string,body:unknown) {
- const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":env.GEMINI_API_KEY!},body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
+ const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":geminiKey(env)},body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
  if(!response.ok) {
   const errorBody=await response.text().catch(()=>"");
   console.error("Gemini HTTP",response.status,errorBody.slice(0,500));

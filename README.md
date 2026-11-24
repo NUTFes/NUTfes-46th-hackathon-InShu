@@ -128,3 +128,22 @@ OpenNextの生成ファイルを書き換えず、専用の小さなWorker `src/
 未登録者には依頼文とコピー可能なSlackユーザーIDを表示し、セッションを発行しません。D1の `pending_logins` には未登録者の直近20人だけを保存（同じ人は最終試行日時を更新）します。責任者は `/lead/staff` でIDを貼り付けて追加するか、登録待ち一覧の「広報担当に追加」で登録できます。登録後は一覧から消え、本人が再ログインすると利用できます。在籍解除済みの担当は自動復帰せず、責任者の在籍復帰操作が必要です。表示名・アイコンのみログイン時の検証済みプロフィールで更新し、責任者権限は変更しません。
 
 更新時は `pnpm db:migrate:local` で `0001_pending_logins.sql` を適用してください。`tests/slack.test.ts` は実RSA鍵・fetch/JWKSモックで認証・拒否・登録待ち・セッション発行を検証します。Slack/Geminiの実接続やデプロイはこの検証に含みません。
+
+## デモ環境のセットアップ
+
+デモ専用の Cloudflare 環境に `SESSION_SECRET`（32文字以上）と `DEMO_PASSCODE`（16文字以上）を Worker のシークレットとして設定します。デモ用ログインでは、シードで登録した架空アカウントを選べます。パスコードの入力を同じ IP から10分間に10回誤ると、最初の失敗から10分が経過するまでログインが制限されます。
+
+以下のコマンドはアプリのディレクトリで実行します。`<db>` はデモ専用の本番 D1 データベース名に置き換えてください。SQL の生成はローカルで行われ、再適用しても既存のシード行は維持されます。
+
+```sh
+pnpm demo:seed-sql
+pnpm exec wrangler d1 migrations apply <db> --remote
+pnpm exec wrangler d1 execute <db> --remote --file demo/seed.sql
+```
+
+ローカル D1 で SQL を検証する場合は、次のコマンドを使います。
+
+```sh
+pnpm exec wrangler d1 migrations apply inshu-local --local --persist-to .wrangler/demo-check
+pnpm exec wrangler d1 execute inshu-local --local --persist-to .wrangler/demo-check --file demo/seed.sql
+```

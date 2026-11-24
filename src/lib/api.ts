@@ -1,3 +1,4 @@
+import { checkDemoPasscode, demoLoginError, demoPasscode } from "./demo-login";
 import { getCloudflareContext } from "@opennextjs/cloudflare";
 import { cookies } from "next/headers";
 import { getCurrentStaff, authEnvironment } from "./auth";
@@ -20,12 +21,16 @@ export async function handle(request:Request, parts:string[]) {
   if(post&&request.headers.get("origin")!==new URL(request.url).origin) fail(403,"このリクエストは受け付けられません。","forbidden");
   if(path==="auth/slack/login"||path==="auth/slack/callback") return request.method==="GET" ? handleSlackAuth(request,env) : apiError(405,"method_not_allowed","GET を使用してください。");
   if(post&&path==="auth/dev-login") {
-   const auth=await authEnvironment(); if(!auth.devLogin) fail(404,"ページが見つかりません。","not_found");
-   let staffId:unknown;
-   if(request.headers.get("content-type")?.includes("application/json")) staffId=(await body()).staff_id;
-   else staffId=(await request.formData()).get("staff_id");
+   const auth=await authEnvironment(), passcode=demoPasscode(env);
+   if(!passcode&&!auth.devLogin) fail(404,"ページが見つかりません。","not_found");
+   const fields=request.headers.get("content-type")?.includes("application/json") ? await body() : Object.fromEntries(await request.formData());
+   if(passcode) {
+    const status=await checkDemoPasscode(env.DB,request,passcode,fields.passcode);
+    if(status!==200) fail(status,demoLoginError(status),status===429?"rate_limited":"invalid_passcode");
+   }
+   const staffId=fields.staff_id;
    if(typeof staffId!=="string") fail(400,"広報担当を選んでください。");
-   const member=await one<{id:string}>("SELECT id FROM staff WHERE id=? AND is_active=1",staffId);
+   const member=await one<{id:string}>("SELECT id FROM staff WHERE id=? AND is_active=1" + (passcode ? " AND slack_user_id GLOB 'FAKE_STAFF_[1-3]'" : ""),staffId);
    if(!member) fail(400,"在籍中の広報担当を選んでください。");
    if(auth.secret.length<32) fail(400,"SESSION_SECRET は32文字以上必要です。");
    const jar=await cookies(); const old=await verifySession(jar.get(SESSION_COOKIE)?.value,auth.secret);

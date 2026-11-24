@@ -64,7 +64,7 @@ export async function replaceImage(env:CloudflareEnv,bytes:Uint8Array,boxes:Box[
   }
   return new Uint8Array(jpeg.encode(image,90).data);
  }
- const response=await generate(env,env.GEMINI_EDIT_MODEL||"gemini-3.8-flash-image",{contents:[{parts:[{text:`枠の中の酒類だけを『${drink}』に置き換える。容器の形・大きさ・光の当たり方・影を保つ。枠の外、特に人物の顔・体・背景は変えない。飲み物でなければ置き換えず元の画像を返す。おまかせは元のお酒の色に近いソフトドリンク。出力はJPEG画像。枠（0〜1）:${JSON.stringify(boxes)}`},inline(bytes)]}],generationConfig:{responseModalities:["TEXT","IMAGE"]}});
+ const response=await generate(env,env.GEMINI_EDIT_MODEL||"gemini-3.1-flash-image",{contents:[{parts:[{text:`枠の中の酒類だけを『${drink}』に置き換える。容器の形・大きさ・光の当たり方・影を保つ。枠の外、特に人物の顔・体・背景は変えない。飲み物でなければ置き換えず元の画像を返す。おまかせは元のお酒の色に近いソフトドリンク。出力はJPEG画像。枠（0〜1）:${JSON.stringify(boxes)}`},inline(bytes)]}],generationConfig:{responseModalities:["TEXT","IMAGE"]}});
  const image=response.candidates?.[0]?.content?.parts?.find(p=>p.inlineData)?.inlineData;
  if(!image||!image.mimeType.startsWith("image/")) throw new Error("加工画像を取得できませんでした。");
  const raw=Buffer.from(image.data,"base64");

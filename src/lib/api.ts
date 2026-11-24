@@ -25,7 +25,7 @@ export async function handle(request:Request, parts:string[]) {
    if(!passcode&&!auth.devLogin) fail(404,"ページが見つかりません。","not_found");
    const fields=request.headers.get("content-type")?.includes("application/json") ? await body() : Object.fromEntries(await request.formData());
    if(passcode) {
-    const status=await checkDemoPasscode(env.DB,request,passcode,fields.passcode);
+    const status=await checkDemoPasscode(env.DB,request,passcode,fields&&typeof fields==="object"?(fields as {passcode?:unknown}).passcode:undefined);
     if(status!==200) fail(status,demoLoginError(status),status===429?"rate_limited":"invalid_passcode");
    }
    const staffId=fields.staff_id;

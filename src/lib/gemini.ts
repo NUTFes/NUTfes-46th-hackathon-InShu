@@ -1,8 +1,10 @@
 import { parseDetection, type Rule, type Box } from "./domain";
+// 秘密の値の前後に付いた BOM・空白・改行を取り除く（PowerShell の Get-Clipboard 経由で登録すると BOM が付くため）
+export const geminiKey=(env:{GEMINI_API_KEY?:string})=>(env.GEMINI_API_KEY??"").replace(/^﻿/,"").trim();
 import jpeg from "jpeg-js";
 const inline=(bytes:Uint8Array)=>({inlineData:{mimeType:"image/jpeg",data:Buffer.from(bytes).toString("base64")}});
 async function generate(env:CloudflareEnv,model:string,body:unknown) {
- const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":env.GEMINI_API_KEY!},body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
+ const response=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{method:"POST",headers:{"Content-Type":"application/json","x-goog-api-key":geminiKey(env)},body:JSON.stringify(body),signal:AbortSignal.timeout(90000)});
  if(!response.ok) {
   const errorBody=await response.text().catch(()=>"");
   console.error("Gemini HTTP",response.status,errorBody.slice(0,500));
@@ -22,7 +24,7 @@ export async function detect(env:CloudflareEnv,bytes:Uint8Array,rules:Rule[]) {
    let hash=0; for(let i=0;i<bytes.length;i+=97) hash=(hash*31+bytes[i])>>>0;
    return parseDetection({findings:rules.slice(0,3).map((r,i)=>({rule_name:r.name,box:{x:0.08+i*0.28,y:0.22+(hash%10)/100,w:0.18,h:0.24},reason:"オフライン動作確認用の枠",confidence:0.75+((hash+i)%20)/100}))},rules);
   }
-  const response=await generate(env,env.GEMINI_DETECT_MODEL||"gemini-2.5-flash",{
+  const response=await generate(env,env.GEMINI_DETECT_MODEL||"gemini-3.8-flash",{
    contents:[{parts:[{text:`広報写真のチェック係として、次の基準に当てはまる写り込みだけを挙げる。当てはまらないものは挙げない。迷ったら confidence を低くして挙げる。人物の容姿については述べない。理由は日本語30字以内。枠は画像の左上を原点とする0〜1の割合。基準: ${JSON.stringify(rules.map(({name,description})=>({name,description})))}`},inline(bytes)]}],
    generationConfig:{responseMimeType:"application/json",responseSchema:{type:"OBJECT",properties:{findings:{type:"ARRAY",items:{type:"OBJECT",properties:{rule_name:{type:"STRING"},box:{type:"OBJECT",properties:{x:{type:"NUMBER"},y:{type:"NUMBER"},w:{type:"NUMBER"},h:{type:"NUMBER"}},required:["x","y","w","h"]},reason:{type:"STRING"},confidence:{type:"NUMBER"}},required:["rule_name","box","reason","confidence"]}}},required:["findings"]}}
   });
@@ -62,7 +64,7 @@ export async function replaceImage(env:CloudflareEnv,bytes:Uint8Array,boxes:Box[
   }
   return new Uint8Array(jpeg.encode(image,90).data);
  }
- const response=await generate(env,env.GEMINI_EDIT_MODEL||"gemini-2.5-flash-image",{contents:[{parts:[{text:`枠の中の酒類だけを『${drink}』に置き換える。容器の形・大きさ・光の当たり方・影を保つ。枠の外、特に人物の顔・体・背景は変えない。飲み物でなければ置き換えず元の画像を返す。おまかせは元のお酒の色に近いソフトドリンク。出力はJPEG画像。枠（0〜1）:${JSON.stringify(boxes)}`},inline(bytes)]}],generationConfig:{responseModalities:["TEXT","IMAGE"]}});
+ const response=await generate(env,env.GEMINI_EDIT_MODEL||"gemini-3.1-flash-image",{contents:[{parts:[{text:`枠の中の酒類だけを『${drink}』に置き換える。容器の形・大きさ・光の当たり方・影を保つ。枠の外、特に人物の顔・体・背景は変えない。飲み物でなければ置き換えず元の画像を返す。おまかせは元のお酒の色に近いソフトドリンク。出力はJPEG画像。枠（0〜1）:${JSON.stringify(boxes)}`},inline(bytes)]}],generationConfig:{responseModalities:["TEXT","IMAGE"]}});
  const image=response.candidates?.[0]?.content?.parts?.find(p=>p.inlineData)?.inlineData;
  if(!image||!image.mimeType.startsWith("image/")) throw new Error("加工画像を取得できませんでした。");
  const raw=Buffer.from(image.data,"base64");
